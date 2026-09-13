@@ -4,7 +4,7 @@ Proyecto desarrollado para la asignatura de Desarrollo Backend III (Semana 5, DU
 
 ## Descripcion del Proyecto
 
-El sistema implementa el patron arquitectonico Backend for Frontend (BFF) para una entidad bancaria. Esta compuesto por tres microservicios Spring Boot totalmente independientes que consumen una base de datos MySQL compartida (`batchdb`), asegurados mediante HTTPS (TLS) y control de acceso basado en roles (RBAC) con Spring Security.
+El sistema implementa el patron arquitectonico Backend for Frontend (BFF) para una entidad bancaria. Esta compuesto por tres microservicios Spring Boot totalmente independientes que consumen una base de datos MySQL compartida (`batchdb`), asegurados mediante HTTPS (TLS) y autenticacion/autorizacion basada en JSON Web Tokens (JWT) con Spring Security.
 
 ## Justificacion del Patron BFF
 
@@ -19,31 +19,39 @@ En lugar de utilizar una API monolitica y generica, el patron BFF permite adapta
 ```text
 bff_proyecto/
 ├── bff-web/        # Servicio Web (Puerto 8081)
-│   ├── src/main/java/cl/duoc/bff/web/ (config, controller, dto, entity, repository, service)
+│   ├── src/main/java/cl/duoc/bff/web/ (config, controller, dto, entity, repository, security, service)
 │   ├── src/main/resources/ (application.properties, keystore.p12)
 │   └── pom.xml
 ├── bff-mobile/     # Servicio Móvil (Puerto 8082)
-│   ├── src/main/java/cl/duoc/bff/mobile/ (config, controller, dto, entity, repository, service)
+│   ├── src/main/java/cl/duoc/bff/mobile/ (config, controller, dto, entity, repository, security, service)
 │   ├── src/main/resources/ (application.properties, keystore.p12)
 │   └── pom.xml
 └── bff-atm/        # Servicio Cajeros Automáticos (Puerto 8083)
-    ├── src/main/java/cl/duoc/bff/atm/ (config, controller, dto, entity, repository, service)
+    ├── src/main/java/cl/duoc/bff/atm/ (config, controller, dto, entity, repository, security, service)
     ├── src/main/resources/ (application.properties, keystore.p12)
     └── pom.xml
 ```
 
-## Mapa de Servicios, Puertos y Roles
+## Mapa de Servicios, Puertos y Seguridad JWT
 
-| Servicio | Puerto | Rol Requerido | Endpoint Base | Enfoque DTO |
-| :--- | :--- | :--- | :--- | :--- |
-| `bff-web` | 8081 (HTTPS) | `ROLE_WEB` | `GET /api/web/cuentas/{cuentaId}` | Completo: `CuentaWebDTO` (`cuentaId`, `nombre`, `edad`, `saldo`, `tipo`) |
-| `bff-mobile` | 8082 (HTTPS) | `ROLE_MOBILE` | `GET /api/mobile/cuentas/{cuentaId}` | Ligero: `CuentaMobileDTO` (`cuentaId`, `nombre`, `saldo`, `tipo`) |
-| `bff-atm` | 8083 (HTTPS) | `ROLE_ATM` | `GET /api/atm/cuentas/{cuentaId}`<br>`POST /api/atm/cuentas/{cuentaId}/retiro` | Transaccional: `CuentaAtmDTO` (`cuentaId`, `saldo`, `tipo`) |
+| Servicio | Puerto | Rol Requerido | Endpoint de Autenticacion | Endpoint Protegido | Enfoque DTO |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `bff-web` | 8081 (HTTPS) | `ROLE_WEB` | `POST /api/auth/token` | `GET /api/web/cuentas/{cuentaId}` | Completo: `CuentaWebDTO` (`cuentaId`, `nombre`, `edad`, `saldo`, `tipo`) |
+| `bff-mobile` | 8082 (HTTPS) | `ROLE_MOBILE` | `POST /api/auth/token` | `GET /api/mobile/cuentas/{cuentaId}` | Ligero: `CuentaMobileDTO` (`cuentaId`, `nombre`, `saldo`, `tipo`) |
+| `bff-atm` | 8083 (HTTPS) | `ROLE_ATM` | `POST /api/auth/token` | `GET /api/atm/cuentas/{cuentaId}`<br>`POST /api/atm/cuentas/{cuentaId}/retiro` | Transaccional: `CuentaAtmDTO` (`cuentaId`, `saldo`, `tipo`) |
+
+### Flujo de Autenticacion JWT:
+1. Peticion a `POST /api/auth/token` con JSON: `{"usuario": "user_web", "rol": "ROLE_WEB"}`.
+2. Respuesta con token firmado: `{"token": "eyJhbGciOiJIUz...", "tipo": "Bearer"}`.
+3. Consumo de endpoints protegidos enviando la cabecera HTTP: `Authorization: Bearer <token>`.
+4. Rechazo automatico con `401 Unauthorized` si el token es ausente o invalido.
+5. Rechazo automatico con `403 Forbidden` si el rol no coincide con el canal (RBAC).
 
 ## Requisitos Tecnicos
 
 - Java 17 o superior.
 - Spring Boot 3.4.x / Spring Security 6 / Spring Data JPA.
+- JJWT 0.12.6 (`jjwt-api`, `jjwt-impl`, `jjwt-jackson`).
 - MySQL Server 8.x en puerto 3306 (Base de datos: `batchdb`, tabla: `interes`).
 - Certificado SSL PKCS12 (`keystore.p12`) configurado localmente en cada servicio.
 

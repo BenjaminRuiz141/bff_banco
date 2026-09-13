@@ -1,0 +1,49 @@
+# ===================================================================
+# Archivos de compilacion y artefactos de Maven (para todos los submodulos)
+# ===================================================================
+target/
+**/target/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+
+*.zip
+*.tar.gz
+*.rar
+
+# ===================================================================
+# Entornos de Desarrollo (IDEs)
+# ===================================================================
+
+# VS Code
+.vscode/
+.history/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Eclipse / Spring Tool Suite (STS)
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+# NetBeans
+nbproject/private/
+build/
+nbbuild/
+dist/
+nbdist/
+
+.DS_Store
+Thumbs.db
+desktop.ini

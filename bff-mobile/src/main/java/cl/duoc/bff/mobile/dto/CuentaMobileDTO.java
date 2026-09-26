@@ -1,10 +1,5 @@
 package cl.duoc.bff.mobile.dto;
 
-/**
- * DTO para el canal Móvil: Optimizado para transferencia ligera de datos,
- * reduciendo el consumo de ancho de banda celular (excluye edad).
- * Basado en las variables de intereses.csv (cuenta_id, nombre, saldo, tipo).
- */
 public class CuentaMobileDTO {
 
     private Integer cuentaId;

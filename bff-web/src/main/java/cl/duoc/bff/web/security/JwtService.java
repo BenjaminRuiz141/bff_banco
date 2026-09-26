@@ -12,9 +12,8 @@ import java.util.Date;
 @Service
 public class JwtService {
 
-    // Clave secreta consistente de 256 bits (HMAC-SHA256)
     private static final String SECRET_KEY = "BancoDuocUcBffSecretKey2026SecureJwtTokenKeyMustBe256BitsLong!";
-    private static final long EXPIRATION_TIME = 1000 * 60 * 60 * 10; // 10 horas
+    private static final long EXPIRATION_TIME = 1000 * 60 * 60 * 10;
 
     private SecretKey getSigningKey() {
         byte[] keyBytes = SECRET_KEY.getBytes(StandardCharsets.UTF_8);

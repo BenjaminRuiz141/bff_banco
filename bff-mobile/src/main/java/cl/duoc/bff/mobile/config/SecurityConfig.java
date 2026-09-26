@@ -30,6 +30,8 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/actuator/**").permitAll()
+                .requestMatchers("/api/mobile/public/**").permitAll()
                 .requestMatchers("/api/mobile/**").hasAuthority("ROLE_MOBILE")
                 .anyRequest().authenticated()
             )

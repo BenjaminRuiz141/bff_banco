@@ -30,6 +30,8 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/actuator/**").permitAll()
+                .requestMatchers("/api/atm/public/**").permitAll()
                 .requestMatchers("/api/atm/**").hasAuthority("ROLE_ATM")
                 .anyRequest().authenticated()
             )

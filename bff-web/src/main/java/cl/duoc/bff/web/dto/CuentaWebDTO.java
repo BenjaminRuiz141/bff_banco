@@ -1,9 +1,5 @@
 package cl.duoc.bff.web.dto;
 
-/**
- * DTO para el canal Web: entrega los datos completos y detallados para navegación en pantalla amplia.
- * Basado en las variables de intereses.csv (cuenta_id, nombre, edad, saldo, tipo).
- */
 public class CuentaWebDTO {
 
     private Integer cuentaId;

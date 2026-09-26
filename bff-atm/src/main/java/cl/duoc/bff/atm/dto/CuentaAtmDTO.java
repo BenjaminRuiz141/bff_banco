@@ -1,10 +1,5 @@
 package cl.duoc.bff.atm.dto;
 
-/**
- * DTO para el canal ATM (Cajeros Automáticos): Estricto y transaccional.
- * Protege la privacidad del titular en cajeros públicos omitiendo nombre y edad.
- * Basado en las variables de intereses.csv (cuenta_id, saldo, tipo).
- */
 public class CuentaAtmDTO {
 
     private Integer cuentaId;

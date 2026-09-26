@@ -1,9 +1,5 @@
 package cl.duoc.bff.atm.dto;
 
-/**
- * DTO para solicitar un retiro de dinero en el canal ATM.
- * Utiliza los nombres de variables del CSV (cuenta_id, monto).
- */
 public class RetiroDTO {
 
     private Integer cuentaId;

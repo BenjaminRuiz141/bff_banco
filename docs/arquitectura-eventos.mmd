@@ -1,0 +1,104 @@
+flowchart TD
+    %% ========================================================
+    %% ESTILOS Y DEFINICIONES DE CLASE
+    %% ========================================================
+    classDef microservice fill:#1E293B,stroke:#38BDF8,stroke-width:2px,color:#F8FAFC;
+    classDef producer fill:#064E3B,stroke:#10B981,stroke-width:2px,color:#ECFDF5;
+    classDef consumer fill:#1E1B4B,stroke:#818CF8,stroke-width:2px,color:#EEF2FF;
+    classDef broker fill:#312E81,stroke:#6366F1,stroke-width:3px,color:#FFFFFF;
+    classDef queue fill:#4C1D95,stroke:#C084FC,stroke-width:2px,color:#FAF5FF;
+    classDef dlq fill:#7F1D1D,stroke:#EF4444,stroke-width:2px,color:#FEF2F2;
+    classDef resilience fill:#78350F,stroke:#F59E0B,stroke-width:2px,color:#FFFBEB;
+    classDef eventContract fill:#0F172A,stroke:#06B6D4,stroke-width:2px,color:#E0F2FE;
+    classDef infra fill:#1E293B,stroke:#94A3B8,stroke-dasharray: 5 5,stroke-width:2px,color:#E2E8F0;
+
+    %% ========================================================
+    %% CONTRATO DEL EVENTO (Payload)
+    %% ========================================================
+    subgraph EventoPayload ["CONTRATO DE MENSAJE: SagaTransaccionEvent"]
+        direction TB
+        E_INFO["<b>SagaTransaccionEvent</b> (DTO Serializable)<br/>---------------------------------------------<br/>• <b>sagaId</b>: String (UUID Unico de Correlacion)<br/>• <b>cuentaId</b>: Integer (Identificador de Cuenta)<br/>• <b>canalOrigen</b>: String (ATM | WEB | MOBILE)<br/>• <b>tipoOperacion</b>: String (RETIRO | TRANSFERENCIA | REVERSA)<br/>• <b>monto</b>: Integer (Monto de la Operacion en CLP)<br/>• <b>estado</b>: String (INICIADO | COMPLETADO | COMPENSADO | FALLIDO)<br/>• <b>timestamp</b>: String (ISO-8601 LocalDateTime)<br/>• <b>descripcion</b>: String (Detalle de Auditoria / Causa)"]:::eventContract
+    end
+
+    %% ========================================================
+    %% MIDDLEWARE: ACTIVEMQ ARTEMIS BROKER
+    %% ========================================================
+    subgraph BrokerCluster ["MIDDLEWARE: Apache ActiveMQ Artemis (:61616 JMS / :8161 Web)"]
+        direction TB
+        Q_TRANS["COLA: <b>banco.saga.transacciones.queue</b><br/><i>(Encola eventos de transacciones ejecutadas)</i>"]:::queue
+        Q_COMP["COLA: <b>banco.saga.compensaciones.queue</b><br/><i>(Encola eventos de reversa / compensacion Saga)</i>"]:::queue
+        Q_DLQ["COLA DLQ: <b>ActiveMQ.DLQ</b><br/><i>(Dead Letter Queue tras agotar reintentos)</i>"]:::dlq
+    end
+
+    %% ========================================================
+    %% MICROSERVICIO: BFF-ATM (:8083)
+    %% ========================================================
+    subgraph MS_ATM ["Microservicio: bff-atm (Puerto 8083 - ROLE_ATM)"]
+        direction TB
+        ATM_API["<b>ATM Controller & Domain Service</b><br/>Retiros en Efectivo / Validacion"]:::microservice
+        
+        ATM_R4J["<b>Resilience4j Protections</b><br/>• @CircuitBreaker('atmRiskValidationService')<br/>• @CircuitBreaker('jmsBrokerService')<br/>• @Retry('jmsBrokerService')"]:::resilience
+        
+        ATM_PROD["<b>SagaAtmProducer</b><br/>[PRODUCTOR]<br/>• publicarTransaccion()<br/>• publicarCompensacion()"]:::producer
+        
+        ATM_API --> ATM_R4J
+        ATM_R4J --> ATM_PROD
+    end
+
+    %% ========================================================
+    %% MICROSERVICIO: BFF-WEB (:8081)
+    %% ========================================================
+    subgraph MS_WEB ["Microservicio: bff-web (Puerto 8081 - ROLE_WEB)"]
+        direction TB
+        WEB_API["<b>Web Controller & Domain Service</b><br/>Transferencias y Cartola Contable"]:::microservice
+
+        WEB_R4J["<b>Resilience4j Protections</b><br/>• @CircuitBreaker('indicadorFinancieroService')<br/>• @CircuitBreaker('jmsBrokerService')<br/>• @Retry('jmsBrokerService')"]:::resilience
+
+        WEB_PROD["<b>SagaWebProducer</b><br/>[PRODUCTOR]<br/>• publicarTransaccion()"]:::producer
+
+        WEB_CONS["<b>SagaWebConsumer</b><br/>[CONSUMIDOR @JmsListener]<br/>• procesarTransaccion() -> Actualiza Saldo / Cartola<br/>• procesarCompensacion() -> Reversa Contable"]:::consumer
+
+        WEB_API --> WEB_R4J
+        WEB_R4J --> WEB_PROD
+    end
+
+    %% ========================================================
+    %% MICROSERVICIO: BFF-MOBILE (:8082)
+    %% ========================================================
+    subgraph MS_MOBILE ["Microservicio: bff-mobile (Puerto 8082 - ROLE_MOBILE)"]
+        direction TB
+        MOB_API["<b>Mobile Controller & Domain Service</b><br/>Consultas Rapidas y Push"]:::microservice
+
+        MOB_R4J["<b>Resilience4j Protections</b><br/>• @CircuitBreaker('notificacionMobileService')"]:::resilience
+
+        MOB_CONS["<b>SagaMobileConsumer</b><br/>[CONSUMIDOR @JmsListener]<br/>• procesarTransaccion() -> Push Transaccion Exitosa<br/>• procesarCompensacion() -> Push Alerta de Reversa"]:::consumer
+
+        MOB_CONS --> MOB_R4J
+        MOB_R4J --> MOB_API
+    end
+
+    %% ========================================================
+    %% FLUJOS DE PUBLICACIÓN (PRODUCTORES -> COLAS)
+    %% ========================================================
+    ATM_PROD -- "Publica Transaccion (Happy Path)" --> Q_TRANS
+    ATM_PROD -- "Publica Rollback (Fallo Hardware / Riesgo)" --> Q_COMP
+    WEB_PROD -- "Publica Transaccion Web" --> Q_TRANS
+
+    %% ========================================================
+    %% ASOCIACIÓN DE CONTRATO A LAS COLAS
+    %% ========================================================
+    EventoPayload -. "Formato de mensaje serializado" .-> BrokerCluster
+
+    %% ========================================================
+    %% FLUJOS DE SUSCRIPCIÓN / CONSUMO (COLAS -> CONSUMIDORES)
+    %% ========================================================
+    Q_TRANS -- "JMS Listener (Consume)" --> WEB_CONS
+    Q_TRANS -- "JMS Listener (Consume)" --> MOB_CONS
+    Q_COMP -- "JMS Listener (Reversa Contable)" --> WEB_CONS
+    Q_COMP -- "JMS Listener (Alerta Push Reversa)" --> MOB_CONS
+
+    %% ========================================================
+    %% DEAD LETTER QUEUE (FALLOS Y REINTENTOS AGOTADOS)
+    %% ========================================================
+    Q_TRANS -. "Fallo no recuperable tras reintentos" .-> Q_DLQ
+    Q_COMP -. "Fallo no recuperable tras reintentos" .-> Q_DLQ

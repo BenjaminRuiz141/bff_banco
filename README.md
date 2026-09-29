@@ -1,260 +1,247 @@
-# Arquitectura de Microservicios y Seguridad en la Nube con Spring Cloud
+# Ecosistema Bancario de Microservicios BFF
 
-**Asignatura:** Desarrollo Backend III (PBY2203 - Semana 6)  
-**Institución:** DUOC UC  
-**Dominio:** Banca Digital & Canales Backend for Frontend (BFF)
+Arquitectura de microservicios bancarios en la nube desarrollada con **Spring Boot 3.4.1**, **Spring Cloud 2024.0.0**, **Apache ActiveMQ Artemis (Docker)**, **Resilience4j** y **Spring Security (JWT)**.
 
 ---
 
-## 1. Descripción de la Arquitectura
+## 1. Servicios y Puertos
 
-Este proyecto implementa una solución de **microservicios bancarios en la nube** utilizando **Spring Boot 3.4.1** y **Spring Cloud 2024.0.0 (Moorgate)**. La arquitectura desacopla la infraestructura del dominio bancario mediante los siguientes patrones y servicios:
-
-1. **Configuración Centralizada (Spring Cloud Config Server):** Servidor centralizado (`config-server`, puerto `8888`) que gestiona las propiedades de configuración en modo `native` desde un repositorio central (`config-repo/`). Los microservicios consumen dinámicamente sus credenciales de base de datos, puertos y umbrales de resiliencia al arrancar.
-2. **Descubrimiento de Servicios (Netflix Eureka Server):** Servidor de registro y descubrimiento (`eureka-server`, puerto `8761`) donde los microservicios se autorregistran con latidos de vida (*heartbeats*) y reportan estado de salud `UP`.
-3. **Ecosistema de Microservicios de Negocio (3 Microservicios BFF):**
-   - **`bff-web` (Puerto 8081):** Canal Web para navegadores de escritorio.
-   - **`bff-mobile` (Puerto 8082):** Canal Móvil optimizado para bajo consumo de datos.
-   - **`bff-atm` (Puerto 8083):** Canal Cajeros Automáticos para operaciones transaccionales y de retiro.
-4. **Tolerancia a Fallos (Resilience4j Circuit Breaker & Fallback):** Protección contra caídas en cascada mediante `@CircuitBreaker` y métodos `@Fallback` ante fallas de servicios externos o alta latencia, con monitorización en tiempo real vía Spring Boot Actuator.
-5. **Seguridad Integral (Spring Security 6 & JWT):** Arquitectura *stateless* protegida por JSON Web Tokens (JJWT), con autorización por roles (RBAC) y control de acceso estricto con códigos `401 Unauthorized` y `403 Forbidden`.
+| Componente | Puerto | Tipo | Función Principal | Credenciales / Acceso |
+| :--- | :--- | :--- | :--- | :--- |
+| **ActiveMQ Artemis** | `61616` / `8161` | Middleware | Broker JMS Jakarta EE & Dashboard de Colas | `admin` / `admin` |
+| **Config Server** | `8888` | Infraestructura | Repositorio Central de Configuración (`config-repo/`) | Público |
+| **Eureka Server** | `8761` | Infraestructura | Service Discovery & Health Dashboard | [http://localhost:8761](http://localhost:8761) |
+| **bff-web** | `8081` | Microservicio | Canal Web, Libro Mayor contable y valorización USD | `ROLE_WEB` |
+| **bff-mobile** | `8082` | Microservicio | Canal Móvil y despacho de Notificaciones Push | `ROLE_MOBILE` |
+| **bff-atm** | `8083` | Microservicio | Canal Cajero, Retiros y Productor Saga con Compensación | `ROLE_ATM` |
 
 ---
 
-## 2. Diagrama Arquitectónico
+## 2. Arquitectura de Eventos y Patrón Saga (ActiveMQ Artemis & Resilience4j)
+
+![Arquitectura de Eventos](docs/arquitectura-eventos.png)
+
+### Diagrama Mermaid de Arquitectura de Eventos
+
+> [!NOTE]
+> Archivo fuente disponible en [`docs/arquitectura-eventos.mmd`](docs/arquitectura-eventos.mmd) y renderizado estático en [`docs/arquitectura-eventos.png`](docs/arquitectura-eventos.png).
 
 ```mermaid
-graph TD
-    subgraph "Servidores de Infraestructura Spring Cloud"
-        CS["Spring Cloud Config Server\n(Puerto 8888)"]
-        ES["Netflix Eureka Server\n(Puerto 8761)"]
+flowchart TD
+    %% ========================================================
+    %% ESTILOS Y DEFINICIONES DE CLASE
+    %% ========================================================
+    classDef microservice fill:#1E293B,stroke:#38BDF8,stroke-width:2px,color:#F8FAFC;
+    classDef producer fill:#064E3B,stroke:#10B981,stroke-width:2px,color:#ECFDF5;
+    classDef consumer fill:#1E1B4B,stroke:#818CF8,stroke-width:2px,color:#EEF2FF;
+    classDef broker fill:#312E81,stroke:#6366F1,stroke-width:3px,color:#FFFFFF;
+    classDef queue fill:#4C1D95,stroke:#C084FC,stroke-width:2px,color:#FAF5FF;
+    classDef dlq fill:#7F1D1D,stroke:#EF4444,stroke-width:2px,color:#FEF2F2;
+    classDef resilience fill:#78350F,stroke:#F59E0B,stroke-width:2px,color:#FFFBEB;
+    classDef eventContract fill:#0F172A,stroke:#06B6D4,stroke-width:2px,color:#E0F2FE;
+
+    %% ========================================================
+    %% CONTRATO DEL EVENTO (Payload)
+    %% ========================================================
+    subgraph EventoPayload ["CONTRATO DE MENSAJE: SagaTransaccionEvent"]
+        direction TB
+        E_INFO["<b>SagaTransaccionEvent</b> (DTO Serializable)<br/>---------------------------------------------<br/>• <b>sagaId</b>: String (UUID Unico de Correlacion)<br/>• <b>cuentaId</b>: Integer (Identificador de Cuenta)<br/>• <b>canalOrigen</b>: String (ATM | WEB | MOBILE)<br/>• <b>tipoOperacion</b>: String (RETIRO | TRANSFERENCIA | REVERSA)<br/>• <b>monto</b>: Integer (Monto de la Operacion en CLP)<br/>• <b>estado</b>: String (INICIADO | COMPLETADO | COMPENSADO | FALLIDO)<br/>• <b>timestamp</b>: String (ISO-8601 LocalDateTime)<br/>• <b>descripcion</b>: String (Detalle de Auditoria / Causa)"]:::eventContract
     end
 
-    subgraph "Repositorio Central de Configuraciones"
-        REPO[("config-repo/\n- application.yml\n- bff-web.yml\n- bff-mobile.yml\n- bff-atm.yml")]
+    %% ========================================================
+    %% MIDDLEWARE: ACTIVEMQ ARTEMIS BROKER
+    %% ========================================================
+    subgraph BrokerCluster ["MIDDLEWARE: Apache ActiveMQ Artemis (:61616 JMS / :8161 Web)"]
+        direction TB
+        Q_TRANS["COLA: <b>banco.saga.transacciones.queue</b><br/><i>(Encola eventos de transacciones ejecutadas)</i>"]:::queue
+        Q_COMP["COLA: <b>banco.saga.compensaciones.queue</b><br/><i>(Encola eventos de reversa / compensacion Saga)</i>"]:::queue
+        Q_DLQ["COLA DLQ: <b>ActiveMQ.DLQ</b><br/><i>(Dead Letter Queue tras agotar reintentos)</i>"]:::dlq
     end
 
-    subgraph "Microservicios Registrados en Eureka (UP)"
-        BW["bff-web :8081\n(ROLE_WEB)"]
-        BM["bff-mobile :8082\n(ROLE_MOBILE)"]
-        BA["bff-atm :8083\n(ROLE_ATM)"]
+    %% ========================================================
+    %% MICROSERVICIO: BFF-ATM (:8083)
+    %% ========================================================
+    subgraph MS_ATM ["Microservicio: bff-atm (Puerto 8083 - ROLE_ATM)"]
+        direction TB
+        ATM_API["<b>ATM Controller & Domain Service</b><br/>Retiros en Efectivo / Validacion"]:::microservice
+        
+        ATM_R4J["<b>Resilience4j Protections</b><br/>• @CircuitBreaker('atmRiskValidationService')<br/>• @CircuitBreaker('jmsBrokerService')<br/>• @Retry('jmsBrokerService')"]:::resilience
+        
+        ATM_PROD["<b>SagaAtmProducer</b><br/>[PRODUCTOR]<br/>• publicarTransaccion()<br/>• publicarCompensacion()"]:::producer
+        
+        ATM_API --> ATM_R4J
+        ATM_R4J --> ATM_PROD
     end
 
-    subgraph "Tolerancia a Fallos (Resilience4j)"
-        EXT_DIV["API Divisas Externa\n(Banco Central / UF / USD)"]
-        EXT_FCM["Gateway Push Móvil\n(Firebase Cloud Messaging)"]
-        EXT_FRAUD["Motor Central Antifraude"]
+    %% ========================================================
+    %% MICROSERVICIO: BFF-WEB (:8081)
+    %% ========================================================
+    subgraph MS_WEB ["Microservicio: bff-web (Puerto 8081 - ROLE_WEB)"]
+        direction TB
+        WEB_API["<b>Web Controller & Domain Service</b><br/>Transferencias y Cartola Contable"]:::microservice
+
+        WEB_R4J["<b>Resilience4j Protections</b><br/>• @CircuitBreaker('indicadorFinancieroService')<br/>• @CircuitBreaker('jmsBrokerService')<br/>• @Retry('jmsBrokerService')"]:::resilience
+
+        WEB_PROD["<b>SagaWebProducer</b><br/>[PRODUCTOR]<br/>• publicarTransaccion()"]:::producer
+
+        WEB_CONS["<b>SagaWebConsumer</b><br/>[CONSUMIDOR @JmsListener]<br/>• procesarTransaccion() -> Actualiza Saldo / Cartola<br/>• procesarCompensacion() -> Reversa Contable"]:::consumer
+
+        WEB_API --> WEB_R4J
+        WEB_R4J --> WEB_PROD
     end
 
-    REPO -->|Lectura native| CS
-    CS -.->|Configura| ES
-    CS -->|Inyecta propiedades| BW
-    CS -->|Inyecta propiedades| BM
-    CS -->|Inyecta propiedades| BA
+    %% ========================================================
+    %% MICROSERVICIO: BFF-MOBILE (:8082)
+    %% ========================================================
+    subgraph MS_MOBILE ["Microservicio: bff-mobile (Puerto 8082 - ROLE_MOBILE)"]
+        direction TB
+        MOB_API["<b>Mobile Controller & Domain Service</b><br/>Consultas Rapidas y Push"]:::microservice
 
-    BW -->|Heartbeat UP| ES
-    BM -->|Heartbeat UP| ES
-    BA -->|Heartbeat UP| ES
+        MOB_R4J["<b>Resilience4j Protections</b><br/>• @CircuitBreaker('notificacionMobileService')"]:::resilience
 
-    BW -->|@CircuitBreaker + Fallback| EXT_DIV
-    BM -->|@CircuitBreaker + Fallback| EXT_FCM
-    BA -->|@CircuitBreaker + Fallback| EXT_FRAUD
+        MOB_CONS["<b>SagaMobileConsumer</b><br/>[CONSUMIDOR @JmsListener]<br/>• procesarTransaccion() -> Push Transaccion Exitosa<br/>• procesarCompensacion() -> Push Alerta de Reversa"]:::consumer
+
+        MOB_CONS --> MOB_R4J
+        MOB_R4J --> MOB_API
+    end
+
+    %% ========================================================
+    %% FLUJOS DE PUBLICACIÓN (PRODUCTORES -> COLAS)
+    %% ========================================================
+    ATM_PROD -- "Publica Transacción (Happy Path)" --> Q_TRANS
+    ATM_PROD -- "Publica Rollback (Fallo Hardware / Riesgo)" --> Q_COMP
+    WEB_PROD -- "Publica Transacción Web" --> Q_TRANS
+
+    %% ========================================================
+    %% ASOCIACIÓN DE CONTRATO A LAS COLAS
+    %% ========================================================
+    EventoPayload -. "Formato de mensaje serializado" .-> BrokerCluster
+
+    %% ========================================================
+    %% FLUJOS DE SUSCRIPCIÓN / CONSUMO (COLAS -> CONSUMIDORES)
+    %% ========================================================
+    Q_TRANS -- "JMS Listener (Consume)" --> WEB_CONS
+    Q_TRANS -- "JMS Listener (Consume)" --> MOB_CONS
+    Q_COMP -- "JMS Listener (Reversa Contable)" --> WEB_CONS
+    Q_COMP -- "JMS Listener (Alerta Push Reversa)" --> MOB_CONS
+
+    %% ========================================================
+    %% DEAD LETTER QUEUE (FALLOS Y REINTENTOS AGOTADOS)
+    %% ========================================================
+    Q_TRANS -. "Fallo no recuperable tras reintentos" .-> Q_DLQ
+    Q_COMP -. "Fallo no recuperable tras reintentos" .-> Q_DLQ
 ```
 
----
+### Detalle de Componentes de la Arquitectura de Eventos
 
-## 3. Matriz de Servicios, Puertos y Roles
+#### A. Colas de Mensajería (ActiveMQ Artemis)
+| Cola / Destino | Propósito | Productores | Consumidores |
+| :--- | :--- | :--- | :--- |
+| `banco.saga.transacciones.queue` | Eventos de transacciones exitosas (Retiros ATM, Transferencias Web). | `bff-atm` (`SagaAtmProducer`), `bff-web` (`SagaWebProducer`) | `bff-web` (`SagaWebConsumer`), `bff-mobile` (`SagaMobileConsumer`) |
+| `banco.saga.compensaciones.queue` | Eventos de compensación / reversa automática por fallo transaccional (ej: atasco en dispensador ATM). | `bff-atm` (`SagaAtmProducer`) | `bff-web` (Reversa contable en base de datos), `bff-mobile` (Push de alerta de seguridad) |
+| `ActiveMQ.DLQ` | Dead Letter Queue para almacenamiento de mensajes irrecuperables tras reintentos fallidos. | ActiveMQ Artemis Broker (automático) | Operaciones / Auditoría |
 
-| Microservicio | Puerto | Tipo de Servicio | Registro Eureka | Rol de Seguridad | Función Principal |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **`config-server`** | `8888` | Infraestructura | N/A | Público | Servidor central de configuraciones (`spring-cloud-config-server`) |
-| **`eureka-server`** | `8761` | Infraestructura | Host (8761) | Público | Service Registry & Discovery Dashboard (`@EnableEurekaServer`) |
-| **`bff-web`** | `8081` | Negocio / BFF | **`UP`** (`BFF-WEB`) | `ROLE_WEB` | Canal Web, DTO completo, valorización multimoneda con Circuit Breaker |
-| **`bff-mobile`** | `8082` | Negocio / BFF | **`UP`** (`BFF-MOBILE`) | `ROLE_MOBILE` | Canal Móvil, DTO ligero, notificaciones push con Circuit Breaker |
-| **`bff-atm`** | `8083` | Negocio / BFF | **`UP`** (`BFF-ATM`) | `ROLE_ATM` | Canal Cajero, DTO operacional, retiros y validación de riesgo con Circuit Breaker |
+#### B. Contrato del Evento (`SagaTransaccionEvent`)
+Todos los mensajes intercambiados a través del broker implementan el DTO `SagaTransaccionEvent`:
+- `sagaId` (`String`): Identificador único universal (UUID) de la saga para rastreo distribuido.
+- `cuentaId` (`Integer`): Identificador de la cuenta bancaria afectada.
+- `canalOrigen` (`String`): Canal que originó el evento (`"ATM"`, `"WEB"`, `"MOBILE"`).
+- `tipoOperacion` (`String`): Tipo de acción ejecutada (`"RETIRO"`, `"TRANSFERENCIA"`, `"REVERSA"`).
+- `monto` (`Integer`): Monto de la operación en pesos chilenos (CLP).
+- `estado` (`String`): Estado actual del ciclo de vida (`"INICIADO"`, `"COMPLETADO"`, `"COMPENSADO"`, `"FALLIDO"`).
+- `timestamp` (`String`): Marca temporal en formato ISO-8601 (`LocalDateTime.now().toString()`).
+- `descripcion` (`String`): Detalle explicativo, causa de reversa o motivo de fallo para auditoría.
 
----
-
-## 4. Estructura del Directorio
-
-```text
-bff_proyecto/
-├── pom.xml                  # POM raíz agregador de compilación Maven
-├── config-repo/             # Directorio central de configuraciones YAML
-│   ├── application.yml      # Configuración compartida (Eureka, Actuator, Resilience4j)
-│   ├── bff-web.yml          # Propiedades de bff-web (puerto 8081, DB, circuit breaker)
-│   ├── bff-mobile.yml       # Propiedades de bff-mobile (puerto 8082, DB, circuit breaker)
-│   └── bff-atm.yml          # Propiedades de bff-atm (puerto 8083, DB, circuit breaker)
-├── config-server/           # Servidor de configuración centralizada (8888)
-├── eureka-server/           # Servidor de descubrimiento de servicios Eureka (8761)
-├── bff-web/                 # Microservicio Canal Web (8081)
-├── bff-mobile/              # Microservicio Canal Móvil (8082)
-└── bff-atm/                 # Microservicio Canal Cajeros (8083)
-```
+#### C. Aplicación de Tolerancia a Fallos (Resilience4j)
+| Microservicio | Componente / Clase | Anotaciones Resilience4j | Mecanismo y Fallback |
+| :--- | :--- | :--- | :--- |
+| **`bff-atm`** | `SagaAtmProducer` | `@CircuitBreaker(name = "jmsBrokerService")`<br/>`@Retry(name = "jmsBrokerService")` | Evita saturar el broker JMS si está caído; fallback registra advertencia y preserva consistencia. Reintenta hasta 3 veces con backoff. |
+| **`bff-atm`** | `AtmRiskValidationService` | `@CircuitBreaker(name = "atmRiskValidationService")` | Protege contra lentitud o fallos en motores antifraude externos; fallback permite operación controlada bajo límite de seguridad. |
+| **`bff-web`** | `SagaWebProducer` | `@CircuitBreaker(name = "jmsBrokerService")`<br/>`@Retry(name = "jmsBrokerService")` | Protege publicación de eventos transaccionales web ante indisponibilidad del middleware. |
+| **`bff-web`** | `IndicadorFinancieroService` | `@CircuitBreaker(name = "indicadorFinancieroService")` | Protege contra fallos en API externa de divisas (mindicador.cl); fallback retorna último valor dólar en caché. |
+| **`bff-mobile`**| `NotificacionMobileService` | `@CircuitBreaker(name = "notificacionMobileService")` | Aísla caídas del proveedor Push (Firebase/APNs); fallback guarda notificación en cola diferida local. |
 
 ---
 
-## 5. Compilación y Orden de Inicio
+## 3. Instrucciones de Arranque
 
-### Compilación Unificada
-Desde la raíz del proyecto (`bff_proyecto/`), compilar todos los módulos simultáneamente:
+### Paso 1: Compilación
 ```bash
 mvn clean compile
 ```
 
-### Orden Estricto de Arranque
-Para asegurar que los microservicios obtengan sus configuraciones y se registren correctamente, inicie los servicios en terminales independientes en este orden:
-
-#### Paso 1: Iniciar Servidor de Configuración (Puerto 8888)
+### Paso 2: Iniciar Broker ActiveMQ (Docker Desktop)
 ```bash
-cd config-server
-mvn spring-boot:run
+docker compose up -d
 ```
-*(Esperar a que finalice la carga de `ConfigServerApplication`).*
+*Consola Web:* [http://localhost:8161/console](http://localhost:8161/console) (Usuario: `admin`, Contraseña: `admin`).
 
-#### Paso 2: Iniciar Servidor Eureka (Puerto 8761)
+### Paso 3: Iniciar Microservicios (en terminales separadas y en este orden)
 ```bash
-cd eureka-server
-mvn spring-boot:run
-```
-*(Verificar dashboard en el navegador: `http://localhost:8761`).*
+# Terminal 1: Servidor de Configuración
+cd config-server && mvn spring-boot:run
 
-#### Paso 3: Iniciar los 3 Microservicios
-- **Terminal 3 (Canal Web):**
-  ```bash
-  cd bff-web
-  mvn spring-boot:run
-  ```
-- **Terminal 4 (Canal Móvil):**
-  ```bash
-  cd bff-mobile
-  mvn spring-boot:run
-  ```
-- **Terminal 5 (Canal Cajero):**
-  ```bash
-  cd bff-atm
-  mvn spring-boot:run
-  ```
+# Terminal 2: Servidor Eureka (esperar a que suba y validar en http://localhost:8761)
+cd eureka-server && mvn spring-boot:run
+
+# Terminal 3: Canal Web
+cd bff-web && mvn spring-boot:run
+
+# Terminal 4: Canal Móvil
+cd bff-mobile && mvn spring-boot:run
+
+# Terminal 5: Canal Cajero
+cd bff-atm && mvn spring-boot:run
+```
 
 ---
 
-## 6. Guía de Pruebas y Validación de Criterios
+## 4. Guía de Pruebas de Criterios
 
-### Criterio 1: Spring Cloud Config Server
-Validar que el servidor de configuración sirve las propiedades centralizadas:
+### A. Registro en Eureka y Config Server
 ```bash
-# Consultar configuraciones del microservicio bff-web
+# Validar los 3 microservicios con estado UP en Eureka:
+curl -s -H "Accept: application/json" http://localhost:8761/eureka/apps
+
+# Validar inyección centralizada de propiedades:
 curl -s http://localhost:8888/bff-web/default
-
-# Consultar configuraciones compartidas globales
-curl -s http://localhost:8888/application/default
 ```
-**Respuesta esperada:** JSON con `propertySources` conteniendo `bff-web.yml` y `application.yml`.
 
----
-
-### Criterio 2: Service Discovery con Netflix Eureka
-Validar que los **3 microservicios** se encuentran registrados con estado **`UP`**:
-
-1. **Vía Navegador Web:** Ingrese a [http://localhost:8761](http://localhost:8761).  
-   En la sección *"Instances currently registered with Eureka"*, se observarán:
-   - **`BFF-WEB`** en `8081` (Status: `UP`)
-   - **`BFF-MOBILE`** en `8082` (Status: `UP`)
-   - **`BFF-ATM`** en `8083` (Status: `UP`)
-
-2. **Vía API REST:**
-   ```bash
-   curl -s -H "Accept: application/json" http://localhost:8761/eureka/apps
-   ```
-   **Respuesta esperada:** JSON con `apps__hashcode: "UP_3_"` y las instancias de los 3 microservicios.
-
----
-
-### Criterio 3: Tolerancia a Fallos con Resilience4j (`@CircuitBreaker` y `@Fallback`)
-
-Cada microservicio dispone de endpoints protegidos por resiliencia y endpoints de prueba inmediata (`test-fallback`):
-
-#### 1. Canal Web (`bff-web` - Puerto 8081):
-- **Ejecución Normal (Circuito CLOSED):**
-  ```bash
-  curl -s "http://localhost:8081/api/web/public/circuit-breaker/test?cuentaId=1&fail=false"
-  ```
-  *Respuesta:* `200 OK` con estado `"estadoCircuito": "CLOSED (Llamada Externa Exitosa)"` y conversión a USD.
-
-- **Ejecución Fallback (Contingencia activada ante caída):**
-  ```bash
-  curl -s "http://localhost:8081/api/web/public/circuit-breaker/test?cuentaId=1&fail=true"
-  ```
-  *Respuesta:* `200 OK` controlado con `"estadoCircuito": "FALLBACK_ACTIVADO (Resilience4j Contingencia)"` y mensaje informativo de contingencia sin error 500.
-
-- **Monitoreo de Estado en Actuator:**
-  ```bash
-  curl -s http://localhost:8081/actuator/circuitbreakers
-  ```
-  *Respuesta:* JSON de Actuator reflejando estado `CLOSED`/`OPEN`, número de llamadas fallidas y umbrales.
-
-#### 2. Canal Cajero (`bff-atm` - Puerto 8083):
-- **Ejecución Normal:**
-  ```bash
-  curl -s "http://localhost:8083/api/atm/public/circuit-breaker/test?cuentaId=1&monto=30000&fail=false"
-  ```
-- **Disparo de Fallback (Retiro pre-autorizado en contingencia):**
-  ```bash
-  curl -s "http://localhost:8083/api/atm/public/circuit-breaker/test?cuentaId=1&monto=30000&fail=true"
-  ```
-
-#### 3. Canal Móvil (`bff-mobile` - Puerto 8082):
-- **Ejecución Normal:**
-  ```bash
-  curl -s "http://localhost:8082/api/mobile/public/circuit-breaker/test?cuentaId=1&fail=false"
-  ```
-- **Disparo de Fallback (Encolamiento en SMS de contingencia):**
-  ```bash
-  curl -s "http://localhost:8082/api/mobile/public/circuit-breaker/test?cuentaId=1&fail=true"
-  ```
-
----
-
-### Criterio 4: Seguridad (Spring Security & JWT)
-
-#### 1. Obtención de Token JWT:
+### B. Patrón Saga con ActiveMQ Artemis (Transacción y Compensación)
 ```bash
-# Token para Canal Web (ROLE_WEB)
+# 1. Escenario Exitoso (Happy Path):
+# ATM debita localmente -> publica en ActiveMQ -> Web sincroniza cartola -> Mobile envía push
+curl -s "http://localhost:8083/api/atm/public/saga-retiro/test?cuentaId=1&monto=30000&fail=false"
+
+# 2. Escenario de Compensación (Rollback automático ante falla):
+# Falla simulada en dispensador -> revierte saldo en MySQL -> publica reversa en ActiveMQ -> notifica a Web y Mobile
+curl -s "http://localhost:8083/api/atm/public/saga-retiro/test?cuentaId=1&monto=30000&fail=true"
+```
+
+### C. Tolerancia a Fallos con Resilience4j (Circuit Breaker & Fallback)
+```bash
+# Llamada normal (Circuito CLOSED):
+curl -s "http://localhost:8081/api/web/public/circuit-breaker/test?cuentaId=1&fail=false"
+
+# Forzar caída de dependencia externa (Activa Fallback):
+curl -s "http://localhost:8081/api/web/public/circuit-breaker/test?cuentaId=1&fail=true"
+
+# Monitoreo de estado en Actuator:
+curl -s http://localhost:8081/actuator/circuitbreakers
+```
+
+### D. Seguridad (Spring Security & JWT)
+```bash
+# 1. Generar Token JWT para Canal Web:
 curl -s "http://localhost:8081/api/auth/token?usuario=profesor&rol=ROLE_WEB"
-```
-*(Copie el valor del campo `token` para las peticiones siguientes).*
 
-#### 2. Petición Exitosa (200 OK con Token y Rol Válido):
-```bash
+# 2. Petición Autorizada con Token (200 OK):
 curl -i -H "Authorization: Bearer <TOKEN_WEB>" "http://localhost:8081/api/web/cuentas/1/indicadores"
-```
-**Respuesta:** `HTTP/1.1 200 OK` con los datos financieros.
 
-#### 3. Petición Rechazada con 401 Unauthorized (Sin Token o Token Inválido):
-```bash
+# 3. Petición Rechazada sin Token (401 Unauthorized):
 curl -i "http://localhost:8081/api/web/cuentas/1/indicadores"
-```
-**Respuesta esperada:**
-```http
-HTTP/1.1 401 Unauthorized
-Content-Type: application/json
 
-{"error": "Unauthorized", "mensaje": "Acceso no autorizado: Token JWT ausente, invalido o expirado"}
-```
-
-#### 4. Petición Rechazada con 403 Forbidden (Rol Incorrecto - RBAC):
-Generar un token con rol ajeno (`ROLE_ATM`):
-```bash
+# 4. Petición Rechazada por Rol Incorrecto RBAC (403 Forbidden):
 curl -s "http://localhost:8081/api/auth/token?usuario=profesor&rol=ROLE_ATM"
-```
-Intentar consumir el endpoint protegido del Canal Web (`/api/web/**`) con dicho token:
-```bash
 curl -i -H "Authorization: Bearer <TOKEN_ATM>" "http://localhost:8081/api/web/cuentas/1/indicadores"
-```
-**Respuesta esperada:**
-```http
-HTTP/1.1 403 Forbidden
-Content-Type: application/json
-
-{"error": "Forbidden", "mensaje": "Acceso denegado: El token no posee la autoridad ROLE_WEB requerida para este canal"}
 ```

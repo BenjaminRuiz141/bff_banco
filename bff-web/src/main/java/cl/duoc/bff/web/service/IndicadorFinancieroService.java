@@ -31,7 +31,7 @@ public class IndicadorFinancieroService {
         }
 
         Cuenta cuenta = cuentaRepository.findById(cuentaId != null ? cuentaId : 1)
-                .orElse(new Cuenta(1, "Cliente Demo Web", 1500000, 30, "Ahorro"));
+                .orElseThrow(() -> new RuntimeException("Cuenta no encontrada con identificador: " + cuentaId));
 
         double valorDolarActual = 945.50;
         double saldoUsd = BigDecimal.valueOf(cuenta.getSaldo() / valorDolarActual)
@@ -53,12 +53,16 @@ public class IndicadorFinancieroService {
         log.warn("ACTIVANDO FALLBACK de IndicadorFinancieroService debido a: {}", ex.getMessage());
 
         Cuenta cuenta = cuentaRepository.findById(cuentaId != null ? cuentaId : 1)
-                .orElse(new Cuenta(1, "Cliente Demo Web", 1500000, 30, "Ahorro"));
+                .orElse(null);
+
+        Integer cuentaIdVal = cuenta != null ? cuenta.getCuentaId() : (cuentaId != null ? cuentaId : 1);
+        String nombreVal = cuenta != null ? cuenta.getNombre() : "Cliente";
+        Integer saldoVal = cuenta != null ? cuenta.getSaldo() : 0;
 
         return new IndicadorFinancieroDTO(
-                cuenta.getCuentaId(),
-                cuenta.getNombre(),
-                cuenta.getSaldo(),
+                cuentaIdVal,
+                nombreVal,
+                saldoVal,
                 null,
                 null,
                 "FALLBACK_ACTIVADO (Resilience4j Contingencia)",

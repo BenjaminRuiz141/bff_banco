@@ -2,6 +2,7 @@ package cl.duoc.bff.atm.controller;
 
 import cl.duoc.bff.atm.dto.CuentaAtmDTO;
 import cl.duoc.bff.atm.dto.RetiroDTO;
+import cl.duoc.bff.atm.dto.SagaRetiroResponseDTO;
 import cl.duoc.bff.atm.service.CuentaAtmService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -39,5 +40,24 @@ public class CuentaAtmController {
             @RequestBody RetiroDTO peticion) {
         CuentaAtmDTO dto = cuentaAtmService.retirar(peticion.getCuentaId(), peticion.getMonto());
         return ResponseEntity.ok(dto);
+    }
+
+    @PostMapping({"/cuentas/{cuentaId}/saga-retiro", "/accounts/{cuentaId}/saga-withdraw"})
+    @PreAuthorize("hasRole('ATM')")
+    public ResponseEntity<SagaRetiroResponseDTO> retirarConSaga(
+            @PathVariable Integer cuentaId,
+            @RequestParam(required = false, defaultValue = "30000") Integer monto,
+            @RequestParam(required = false, defaultValue = "false") boolean fail) {
+        SagaRetiroResponseDTO response = cuentaAtmService.retirarConSaga(cuentaId, monto, fail);
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/public/saga-retiro/test")
+    public ResponseEntity<SagaRetiroResponseDTO> testSagaRetiro(
+            @RequestParam(required = false, defaultValue = "1") Integer cuentaId,
+            @RequestParam(required = false, defaultValue = "30000") Integer monto,
+            @RequestParam(required = false, defaultValue = "false") boolean fail) {
+        SagaRetiroResponseDTO response = cuentaAtmService.retirarConSaga(cuentaId, monto, fail);
+        return ResponseEntity.ok(response);
     }
 }

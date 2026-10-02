@@ -16,19 +16,10 @@ public class MobileNotificacionController {
     }
 
     @PostMapping("/api/mobile/cuentas/{cuentaId}/notificaciones")
-    @PreAuthorize("hasRole('ROLE_MOBILE')")
+    @PreAuthorize("hasRole('MOBILE')")
     public ResponseEntity<NotificacionMobileDTO> enviarNotificacionProtegido(
             @PathVariable Integer cuentaId,
-            @RequestParam(defaultValue = "Movimiento registrado en tu cuenta") String mensaje,
-            @RequestParam(defaultValue = "false") boolean forzarFallo) {
-        return ResponseEntity.ok(notificacionMobileService.enviarNotificacion(cuentaId, mensaje, forzarFallo));
-    }
-
-    @GetMapping("/api/mobile/public/circuit-breaker/test")
-    public ResponseEntity<NotificacionMobileDTO> testCircuitBreaker(
-            @RequestParam(defaultValue = "1") Integer cuentaId,
-            @RequestParam(defaultValue = "Alerta de prueba móvil") String mensaje,
-            @RequestParam(defaultValue = "false") boolean fail) {
-        return ResponseEntity.ok(notificacionMobileService.enviarNotificacion(cuentaId, mensaje, fail));
+            @RequestParam(defaultValue = "Movimiento registrado en tu cuenta") String mensaje) {
+        return ResponseEntity.ok(notificacionMobileService.enviarNotificacion(cuentaId, mensaje));
     }
 }

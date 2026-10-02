@@ -1,0 +1,23 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: auth-service
+  security:
+    oauth2:
+      client:
+        registration:
+          github:
+            client-id: ${GITHUB_CLIENT_ID:dummy_client_id}
+            client-secret: ${GITHUB_CLIENT_SECRET:dummy_client_secret}
+            scope:
+              - read:user
+              - user:email
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+
+auth:
+  default-roles:
+    - ROLE_WEB
+    - ROLE_MOBILE
+    - ROLE_ATM

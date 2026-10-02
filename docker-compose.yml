@@ -1,4 +1,7 @@
 services:
+  # ===================================================================
+  # 1. BROKER JMS: Apache ActiveMQ Artemis
+  # ===================================================================
   activemq-artemis:
     image: apache/activemq-artemis:latest-alpine
     container_name: activemq-artemis
@@ -7,6 +10,215 @@ services:
       - ARTEMIS_PASSWORD=admin
       - ANONYMOUS_LOGIN=true
     ports:
-      - "8161:8161"   # Consola Web (http://localhost:8161)
-      - "61616:61616" # Puerto JMS Core / TCP
+      - "8161:8161"
+      - "61616:61616"
+    networks:
+      - banco-network
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q --spider http://localhost:8161 || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
+
+  # ===================================================================
+  # 2. INFRAESTRUCTURA: Spring Cloud Config Server
+  # ===================================================================
+  config-server:
+    build:
+      context: ./config-server
+      dockerfile: Dockerfile
+    container_name: config-server
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./config-repo:/config-repo:ro
+    environment:
+      - SPRING_PROFILES_ACTIVE=native
+      - SPRING_CLOUD_CONFIG_SERVER_NATIVE_SEARCH_LOCATIONS=file:/config-repo,classpath:/config-repo
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+      - EUREKA_CLIENT_REGISTER_WITH_EUREKA=false
+      - EUREKA_CLIENT_FETCH_REGISTRY=false
+      - JWT_SECRET=${JWT_SECRET}
+    networks:
+      - banco-network
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q --spider http://localhost:8888/actuator/health || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # ===================================================================
+  # 3. INFRAESTRUCTURA: Netflix Eureka Discovery Server
+  # ===================================================================
+  eureka-server:
+    build:
+      context: ./eureka-server
+      dockerfile: Dockerfile
+    container_name: eureka-server
+    ports:
+      - "8761:8761"
+    environment:
+      - EUREKA_CLIENT_REGISTER_WITH_EUREKA=false
+      - EUREKA_CLIENT_FETCH_REGISTRY=false
+    networks:
+      - banco-network
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q --spider http://localhost:8761/actuator/health || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # ===================================================================
+  # 4. SEGURIDAD: auth-service (GitHub OAuth2 & JWT)
+  # ===================================================================
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: auth-service
+    ports:
+      - "8084:8084"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    environment:
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
+    networks:
+      - banco-network
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q --spider http://localhost:8084/actuator/health || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # ===================================================================
+  # 5. MICROSERVICIO: bff-web (ROLE_WEB)
+  # ===================================================================
+  bff-web:
+    build:
+      context: ./bff-web
+      dockerfile: Dockerfile
+    container_name: bff-web
+    ports:
+      - "8081:8081"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+      activemq-artemis:
+        condition: service_healthy
+    environment:
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+      - SPRING_ARTEMIS_BROKER_URL=tcp://activemq-artemis:61616
+      - SPRING_DATASOURCE_URL=jdbc:mysql://host.docker.internal:3306/batchdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      - SPRING_DATASOURCE_USERNAME=${DB_USERNAME:-root}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD:-MyDUOCSQL004!}
+      - JWT_SECRET=${JWT_SECRET}
+    networks:
+      - banco-network
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q --spider http://localhost:8081/actuator/health || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+    restart: unless-stopped
+
+  # ===================================================================
+  # 6. MICROSERVICIO: bff-mobile (ROLE_MOBILE)
+  # ===================================================================
+  bff-mobile:
+    build:
+      context: ./bff-mobile
+      dockerfile: Dockerfile
+    container_name: bff-mobile
+    ports:
+      - "8082:8082"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+      activemq-artemis:
+        condition: service_healthy
+    environment:
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+      - SPRING_ARTEMIS_BROKER_URL=tcp://activemq-artemis:61616
+      - SPRING_DATASOURCE_URL=jdbc:mysql://host.docker.internal:3306/batchdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      - SPRING_DATASOURCE_USERNAME=${DB_USERNAME:-root}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD:-MyDUOCSQL004!}
+      - JWT_SECRET=${JWT_SECRET}
+    networks:
+      - banco-network
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q --spider http://localhost:8082/actuator/health || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+    restart: unless-stopped
+
+  # ===================================================================
+  # 7. MICROSERVICIO: bff-atm (ROLE_ATM)
+  # ===================================================================
+  bff-atm:
+    build:
+      context: ./bff-atm
+      dockerfile: Dockerfile
+    container_name: bff-atm
+    ports:
+      - "8083:8083"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+      activemq-artemis:
+        condition: service_healthy
+    environment:
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+      - SPRING_ARTEMIS_BROKER_URL=tcp://activemq-artemis:61616
+      - SPRING_DATASOURCE_URL=jdbc:mysql://host.docker.internal:3306/batchdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      - SPRING_DATASOURCE_USERNAME=${DB_USERNAME:-root}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD:-MyDUOCSQL004!}
+      - JWT_SECRET=${JWT_SECRET}
+    networks:
+      - banco-network
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q --spider http://localhost:8083/actuator/health || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+    restart: unless-stopped
+
+# ===================================================================
+# RED INTERNA
+# ===================================================================
+networks:
+  banco-network:
+    driver: bridge

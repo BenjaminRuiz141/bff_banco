@@ -19,16 +19,7 @@ public class AtmRiskController {
     @PreAuthorize("hasRole('ATM')")
     public ResponseEntity<RiskValidationDTO> validarRiesgoProtegido(
             @PathVariable Integer cuentaId,
-            @RequestParam(defaultValue = "30000") Integer monto,
-            @RequestParam(defaultValue = "false") boolean forzarFallo) {
-        return ResponseEntity.ok(atmRiskValidationService.validarRiesgoRetiro(cuentaId, monto, forzarFallo));
-    }
-
-    @GetMapping("/api/atm/public/circuit-breaker/test")
-    public ResponseEntity<RiskValidationDTO> testCircuitBreaker(
-            @RequestParam(defaultValue = "1") Integer cuentaId,
-            @RequestParam(defaultValue = "30000") Integer monto,
-            @RequestParam(defaultValue = "false") boolean fail) {
-        return ResponseEntity.ok(atmRiskValidationService.validarRiesgoRetiro(cuentaId, monto, fail));
+            @RequestParam(defaultValue = "30000") Integer monto) {
+        return ResponseEntity.ok(atmRiskValidationService.validarRiesgoRetiro(cuentaId, monto));
     }
 }

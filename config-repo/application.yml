@@ -63,3 +63,8 @@ banco:
       transacciones: banco.saga.transacciones.queue
       compensaciones: banco.saga.compensaciones.queue
       dlq: ActiveMQ.DLQ
+
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: ${JWT_EXPIRATION:36000000}
+

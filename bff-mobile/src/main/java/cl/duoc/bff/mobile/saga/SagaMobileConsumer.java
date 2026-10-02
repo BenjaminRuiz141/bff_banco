@@ -28,8 +28,7 @@ public class SagaMobileConsumer {
 
         NotificacionMobileDTO pushResult = notificacionMobileService.enviarNotificacion(
                 event.getCuentaId(),
-                textoAlerta,
-                false
+                textoAlerta
         );
 
         log.info("[SAGA-MOBILE-CONSUMER] Notificación push despachada exitosamente para sagaId {}: {}",
@@ -45,8 +44,7 @@ public class SagaMobileConsumer {
 
         NotificacionMobileDTO pushResult = notificacionMobileService.enviarNotificacion(
                 event.getCuentaId(),
-                textoAlertaUrgente,
-                false
+                textoAlertaUrgente
         );
 
         log.warn("[SAGA-MOBILE-CONSUMER] Notificación de reversa despachada al smartphone: {}",

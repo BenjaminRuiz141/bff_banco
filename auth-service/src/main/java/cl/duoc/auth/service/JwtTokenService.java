@@ -1,4 +1,4 @@
-package cl.duoc.bff.mobile.security;
+package cl.duoc.auth.service;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
@@ -14,14 +14,54 @@ import java.util.Date;
 import java.util.List;
 
 @Service
-public class JwtService {
+public class JwtTokenService {
 
     @Value("${jwt.secret}")
     private String secretKey;
 
+    @Value("${jwt.expiration:36000000}")
+    private long expirationTime;
+
     private SecretKey getSigningKey() {
         byte[] keyBytes = secretKey.getBytes(StandardCharsets.UTF_8);
         return Keys.hmacShaKeyFor(keyBytes);
+    }
+
+    public String generarToken(String usuario, List<String> roles) {
+        List<String> rolesNormalizados = (roles == null || roles.isEmpty())
+                ? List.of("ROLE_WEB", "ROLE_MOBILE", "ROLE_ATM")
+                : roles.stream()
+                    .map(r -> r.startsWith("ROLE_") ? r : "ROLE_" + r)
+                    .toList();
+
+        String rolString = String.join(",", rolesNormalizados);
+
+        Date ahora = new Date();
+        Date expiracion = new Date(ahora.getTime() + expirationTime);
+
+        return Jwts.builder()
+                .subject(usuario)
+                .claim("rol", rolString)
+                .claim("roles", rolesNormalizados)
+                .issuedAt(ahora)
+                .expiration(expiracion)
+                .signWith(getSigningKey())
+                .compact();
+    }
+
+    public String generarToken(String usuario, String rol) {
+        String rolNormalizado = rol != null && !rol.isBlank()
+                ? (rol.startsWith("ROLE_") ? rol : "ROLE_" + rol)
+                : "ROLE_WEB";
+
+        if (rolNormalizado.contains(",")) {
+            List<String> listaRoles = Arrays.stream(rolNormalizado.split(","))
+                    .map(String::trim)
+                    .toList();
+            return generarToken(usuario, listaRoles);
+        }
+
+        return generarToken(usuario, List.of(rolNormalizado));
     }
 
     public Claims extraerClaims(String token) {
@@ -36,6 +76,7 @@ public class JwtService {
         return extraerClaims(token).getSubject();
     }
 
+    @SuppressWarnings("unchecked")
     public List<String> extraerRoles(String token) {
         Claims claims = extraerClaims(token);
         Object rolesObj = claims.get("roles");
@@ -60,5 +101,9 @@ public class JwtService {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    public long getExpirationTime() {
+        return expirationTime;
     }
 }

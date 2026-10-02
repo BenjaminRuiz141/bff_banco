@@ -22,13 +22,8 @@ public class IndicadorFinancieroService {
     }
 
     @CircuitBreaker(name = "indicadorFinancieroService", fallbackMethod = "fallbackIndicadores")
-    public IndicadorFinancieroDTO obtenerValorizacionCuenta(Integer cuentaId, boolean forzarFallo) {
-        log.info("Ejecutando llamada a servicio externo de divisas para cuentaId: {}, forzarFallo: {}", cuentaId, forzarFallo);
-
-        if (forzarFallo) {
-            log.warn("Disparando excepción intencional para verificar apertura del Circuit Breaker y activación de Fallback");
-            throw new RuntimeException("Error simulado: Timeout al conectar con la API externa del Banco Central / Indicadores");
-        }
+    public IndicadorFinancieroDTO obtenerValorizacionCuenta(Integer cuentaId) {
+        log.info("Ejecutando llamada a servicio externo de divisas para cuentaId: {}", cuentaId);
 
         Cuenta cuenta = cuentaRepository.findById(cuentaId != null ? cuentaId : 1)
                 .orElseThrow(() -> new RuntimeException("Cuenta no encontrada con identificador: " + cuentaId));
@@ -49,7 +44,7 @@ public class IndicadorFinancieroService {
         );
     }
 
-    public IndicadorFinancieroDTO fallbackIndicadores(Integer cuentaId, boolean forzarFallo, Throwable ex) {
+    public IndicadorFinancieroDTO fallbackIndicadores(Integer cuentaId, Throwable ex) {
         log.warn("ACTIVANDO FALLBACK de IndicadorFinancieroService debido a: {}", ex.getMessage());
 
         Cuenta cuenta = cuentaRepository.findById(cuentaId != null ? cuentaId : 1)

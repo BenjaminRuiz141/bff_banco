@@ -46,18 +46,18 @@ public class CuentaAtmController {
     @PreAuthorize("hasRole('ATM')")
     public ResponseEntity<SagaRetiroResponseDTO> retirarConSaga(
             @PathVariable Integer cuentaId,
-            @RequestParam(required = false, defaultValue = "30000") Integer monto,
-            @RequestParam(required = false, defaultValue = "false") boolean fail) {
-        SagaRetiroResponseDTO response = cuentaAtmService.retirarConSaga(cuentaId, monto, fail);
+            @RequestParam(required = false, defaultValue = "30000") Integer monto) {
+        SagaRetiroResponseDTO response = cuentaAtmService.retirarConSaga(cuentaId, monto);
         return ResponseEntity.ok(response);
     }
 
-    @GetMapping("/public/saga-retiro/test")
-    public ResponseEntity<SagaRetiroResponseDTO> testSagaRetiro(
-            @RequestParam(required = false, defaultValue = "1") Integer cuentaId,
-            @RequestParam(required = false, defaultValue = "30000") Integer monto,
-            @RequestParam(required = false, defaultValue = "false") boolean fail) {
-        SagaRetiroResponseDTO response = cuentaAtmService.retirarConSaga(cuentaId, monto, fail);
+    @PostMapping({"/cuentas/{cuentaId}/saga-compensar", "/accounts/{cuentaId}/saga-compensate"})
+    @PreAuthorize("hasRole('ATM')")
+    public ResponseEntity<SagaRetiroResponseDTO> compensarRetiro(
+            @PathVariable Integer cuentaId,
+            @RequestParam String sagaId,
+            @RequestParam(required = false, defaultValue = "30000") Integer monto) {
+        SagaRetiroResponseDTO response = cuentaAtmService.compensarRetiro(sagaId, cuentaId, monto);
         return ResponseEntity.ok(response);
     }
 }

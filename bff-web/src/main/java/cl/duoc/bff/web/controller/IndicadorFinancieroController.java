@@ -17,16 +17,7 @@ public class IndicadorFinancieroController {
 
     @GetMapping("/api/web/cuentas/{cuentaId}/indicadores")
     @PreAuthorize("hasRole('WEB')")
-    public ResponseEntity<IndicadorFinancieroDTO> obtenerIndicadoresProtegido(
-            @PathVariable Integer cuentaId,
-            @RequestParam(defaultValue = "false") boolean forzarFallo) {
-        return ResponseEntity.ok(indicadorFinancieroService.obtenerValorizacionCuenta(cuentaId, forzarFallo));
-    }
-
-    @GetMapping("/api/web/public/circuit-breaker/test")
-    public ResponseEntity<IndicadorFinancieroDTO> testCircuitBreaker(
-            @RequestParam(defaultValue = "1") Integer cuentaId,
-            @RequestParam(defaultValue = "false") boolean fail) {
-        return ResponseEntity.ok(indicadorFinancieroService.obtenerValorizacionCuenta(cuentaId, fail));
+    public ResponseEntity<IndicadorFinancieroDTO> obtenerIndicadoresProtegido(@PathVariable Integer cuentaId) {
+        return ResponseEntity.ok(indicadorFinancieroService.obtenerValorizacionCuenta(cuentaId));
     }
 }

@@ -12,13 +12,8 @@ public class NotificacionMobileService {
     private static final Logger log = LoggerFactory.getLogger(NotificacionMobileService.class);
 
     @CircuitBreaker(name = "notificacionMobileService", fallbackMethod = "fallbackNotificacion")
-    public NotificacionMobileDTO enviarNotificacion(Integer cuentaId, String mensaje, boolean forzarFallo) {
+    public NotificacionMobileDTO enviarNotificacion(Integer cuentaId, String mensaje) {
         log.info("Enviando push notification externa para cuentaId: {}, mensaje: {}", cuentaId, mensaje);
-
-        if (forzarFallo) {
-            log.warn("Simulando fallo en gateway push para prueba de Circuit Breaker en bff-mobile");
-            throw new RuntimeException("Error simulado: Firebase Cloud Messaging / Gateway Push no disponible");
-        }
 
         return new NotificacionMobileDTO(
                 cuentaId,
@@ -29,7 +24,7 @@ public class NotificacionMobileService {
         );
     }
 
-    public NotificacionMobileDTO fallbackNotificacion(Integer cuentaId, String mensaje, boolean forzarFallo, Throwable ex) {
+    public NotificacionMobileDTO fallbackNotificacion(Integer cuentaId, String mensaje, Throwable ex) {
         log.warn("ACTIVANDO FALLBACK de NotificacionMobileService debido a: {}", ex.getMessage());
 
         return new NotificacionMobileDTO(

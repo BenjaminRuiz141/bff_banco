@@ -3,32 +3,25 @@ package cl.duoc.bff.atm.security;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
+import java.util.List;
 
 @Service
 public class JwtService {
 
-    private static final String SECRET_KEY = "BancoDuocUcBffSecretKey2026SecureJwtTokenKeyMustBe256BitsLong!";
-    private static final long EXPIRATION_TIME = 1000 * 60 * 60 * 10;
+    @Value("${jwt.secret}")
+    private String secretKey;
 
     private SecretKey getSigningKey() {
-        byte[] keyBytes = SECRET_KEY.getBytes(StandardCharsets.UTF_8);
+        byte[] keyBytes = secretKey.getBytes(StandardCharsets.UTF_8);
         return Keys.hmacShaKeyFor(keyBytes);
-    }
-
-    public String generarToken(String usuario, String rol) {
-        String rolNormalizado = rol.startsWith("ROLE_") ? rol : "ROLE_" + rol;
-        return Jwts.builder()
-                .subject(usuario)
-                .claim("rol", rolNormalizado)
-                .issuedAt(new Date(System.currentTimeMillis()))
-                .expiration(new Date(System.currentTimeMillis() + EXPIRATION_TIME))
-                .signWith(getSigningKey())
-                .compact();
     }
 
     public Claims extraerClaims(String token) {
@@ -43,8 +36,21 @@ public class JwtService {
         return extraerClaims(token).getSubject();
     }
 
-    public String extraerRol(String token) {
-        return extraerClaims(token).get("rol", String.class);
+    public List<String> extraerRoles(String token) {
+        Claims claims = extraerClaims(token);
+        Object rolesObj = claims.get("roles");
+        if (rolesObj instanceof List<?> list) {
+            return list.stream().map(Object::toString).toList();
+        }
+
+        String rolStr = claims.get("rol", String.class);
+        if (rolStr != null && !rolStr.isBlank()) {
+            return Arrays.stream(rolStr.split(","))
+                    .map(String::trim)
+                    .toList();
+        }
+
+        return Collections.emptyList();
     }
 
     public boolean validarToken(String token) {

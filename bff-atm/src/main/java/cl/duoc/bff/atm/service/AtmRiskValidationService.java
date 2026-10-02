@@ -12,13 +12,8 @@ public class AtmRiskValidationService {
     private static final Logger log = LoggerFactory.getLogger(AtmRiskValidationService.class);
 
     @CircuitBreaker(name = "atmRiskValidationService", fallbackMethod = "fallbackValidacionRiesgo")
-    public RiskValidationDTO validarRiesgoRetiro(Integer cuentaId, Integer monto, boolean forzarFallo) {
+    public RiskValidationDTO validarRiesgoRetiro(Integer cuentaId, Integer monto) {
         log.info("Consultando servicio externo de riesgo/fraude para cuentaId: {}, monto: {}", cuentaId, monto);
-
-        if (forzarFallo) {
-            log.warn("Provocando caída controlada para prueba de Circuit Breaker en ATM");
-            throw new RuntimeException("Error simulado: Timeout al consultar el motor central de scoring anti-fraude");
-        }
 
         return new RiskValidationDTO(
                 cuentaId,
@@ -29,7 +24,7 @@ public class AtmRiskValidationService {
         );
     }
 
-    public RiskValidationDTO fallbackValidacionRiesgo(Integer cuentaId, Integer monto, boolean forzarFallo, Throwable ex) {
+    public RiskValidationDTO fallbackValidacionRiesgo(Integer cuentaId, Integer monto, Throwable ex) {
         log.warn("ACTIVANDO FALLBACK de AtmRiskValidationService debido a: {}", ex.getMessage());
 
         boolean permiteContingencia = monto != null && monto <= 50000;

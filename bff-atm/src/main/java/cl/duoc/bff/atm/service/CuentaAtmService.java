@@ -34,13 +34,13 @@ public class CuentaAtmService {
     }
 
     public CuentaAtmDTO retirar(Integer cuentaId, Integer monto) {
-        retirarConSaga(cuentaId, monto, false);
+        retirarConSaga(cuentaId, monto);
         Cuenta cuenta = cuentaRepository.findById(cuentaId).orElseThrow();
         return mapToAtmDto(cuenta);
     }
 
     @Transactional
-    public SagaRetiroResponseDTO retirarConSaga(Integer cuentaId, Integer monto, boolean forzarFallo) {
+    public SagaRetiroResponseDTO retirarConSaga(Integer cuentaId, Integer monto) {
         if (monto == null || monto <= 0) {
             throw new IllegalArgumentException("El monto a retirar debe ser mayor a cero.");
         }
@@ -59,35 +59,6 @@ public class CuentaAtmService {
         cuenta.setSaldo(saldoAnterior - monto);
         cuentaRepository.save(cuenta);
 
-        if (forzarFallo) {
-            log.warn("[SAGA-ATM] Fallo simulado detectado en dispensador físico de billetes para {}", sagaId);
-
-            cuenta.setSaldo(saldoAnterior);
-            cuentaRepository.save(cuenta);
-            log.info("[SAGA-ATM] Compensación ejecutada localmente: Saldo restituido a ${}", saldoAnterior);
-
-            SagaTransaccionEvent compensacionEvent = new SagaTransaccionEvent(
-                    sagaId,
-                    cuentaId,
-                    "BFF_ATM",
-                    "REVERSA",
-                    monto,
-                    "COMPENSADO",
-                    "Falla física de dispensador en ATM. Giro cancelado y saldo reintegrado."
-            );
-            sagaAtmProducer.publicarCompensacion(compensacionEvent);
-
-            return new SagaRetiroResponseDTO(
-                    sagaId,
-                    cuentaId,
-                    monto,
-                    saldoAnterior,
-                    "COMPENSADA_ROLLBACK",
-                    "Transacción compensada: El cajero presentó una falla física. El saldo de $" + monto +
-                            " fue reintegrado automáticamente a su cuenta y se notificó a los demás canales."
-            );
-        }
-
         SagaTransaccionEvent exitoEvent = new SagaTransaccionEvent(
                 sagaId,
                 cuentaId,
@@ -104,8 +75,39 @@ public class CuentaAtmService {
                 cuentaId,
                 monto,
                 cuenta.getSaldo(),
-                "COMPLETADA",
+                "COMPLETADO",
                 "Giro completado exitosamente por $" + monto + ". Evento publicado en ActiveMQ para sincronización multicanal."
+        );
+    }
+
+    @Transactional
+    public SagaRetiroResponseDTO compensarRetiro(String sagaId, Integer cuentaId, Integer monto) {
+        Cuenta cuenta = cuentaRepository.findById(cuentaId)
+                .orElseThrow(() -> new RuntimeException("Cuenta no encontrada para canal ATM: " + cuentaId));
+
+        int saldoRestituido = cuenta.getSaldo() + monto;
+        cuenta.setSaldo(saldoRestituido);
+        cuentaRepository.save(cuenta);
+        log.info("[SAGA-ATM] Compensación ejecutada: Saldo restituido a ${}", saldoRestituido);
+
+        SagaTransaccionEvent compensacionEvent = new SagaTransaccionEvent(
+                sagaId,
+                cuentaId,
+                "BFF_ATM",
+                "REVERSA",
+                monto,
+                "COMPENSADO",
+                "Reversa de transacción ejecutada en ATM. Saldo reintegrado a la cuenta."
+        );
+        sagaAtmProducer.publicarCompensacion(compensacionEvent);
+
+        return new SagaRetiroResponseDTO(
+                sagaId,
+                cuentaId,
+                monto,
+                saldoRestituido,
+                "COMPENSADO",
+                "Transacción compensada: Saldo reintegrado exitosamente por $" + monto + "."
         );
     }
 
